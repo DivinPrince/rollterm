@@ -44,7 +44,7 @@
     "prepublishOnly": "bun run build",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "bun publish --access public"
+    "release": "changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",

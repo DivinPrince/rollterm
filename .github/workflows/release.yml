@@ -44,6 +44,7 @@ jobs:
         with:
           version: bun run version
           publish: bun run release
+          createGithubReleases: true
           title: "chore: version packages"
           commit: "chore: version packages"
         env:
