@@ -7,7 +7,6 @@ import {
 } from "./devices";
 import {
   buildAvfoundationMicInput,
-  buildPipFilter,
   overlayPosition,
 } from "./filters";
 
@@ -40,12 +39,6 @@ describe("filters", () => {
   test("overlay positions", () => {
     expect(overlayPosition("bottom-right")).toBe("main_w-overlay_w-20:main_h-overlay_h-20");
     expect(overlayPosition("top-left")).toBe("20:20");
-  });
-
-  test("pip filter", () => {
-    expect(buildPipFilter("bottom-right", "320x240")).toBe(
-      "[1:v]scale=320:-1[cam];[0:v][cam]overlay=main_w-overlay_w-20:main_h-overlay_h-20[v]",
-    );
   });
 
   test("mic input uses none: index", () => {

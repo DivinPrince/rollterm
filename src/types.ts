@@ -13,6 +13,7 @@ export type PipPosition =
   | "top-left";
 
 import type { RecordingPaths } from "./paths";
+import type { RenderOverridesInput } from "./render/overrides";
 
 export type { RecordingPaths };
 
@@ -23,18 +24,10 @@ export interface RecordOptions {
   micIndex?: number;
   fps: number;
   duration?: number;
-  position: PipPosition;
-  cameraSize: string;
   showCursor: boolean;
-}
-
-export interface MergeOptions {
-  screenPath: string;
-  cameraPath: string;
-  output: string;
-  position: PipPosition;
-  cameraSize: string;
-  audioPath?: string;
-  fps?: number;
-  includeCamera?: boolean;
+  /** Max encoded screen width; full Retina capture is scaled down before encode. */
+  screenMaxWidth: number;
+  render?: RenderOverridesInput;
+  skipRender?: boolean;
+  onRenderProgress?: (progress: { frame: number; total: number }) => void;
 }

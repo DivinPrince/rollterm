@@ -7,12 +7,32 @@ import {
   formatDeviceList,
   listDevices,
 } from "./src/devices";
+import { DEFAULT_SCREEN_MAX_WIDTH } from "./src/encode";
 import { isBundledFfmpeg, resolveFfmpeg } from "./src/ffmpeg";
-import { mergeFromCli } from "./src/merge";
+import { recordingsDir } from "./src/paths";
+import {
+  formatPresetList,
+  parseRenderOverrides,
+  renderFromPath,
+  resolveSessionDir,
+} from "./src/render";
 import { startRecording } from "./src/record";
 import type { PipPosition, RecordOptions } from "./src/types";
 import { createRecordingSession } from "./src/paths";
-import { watchRecording } from "./src/ui";
+import { RenderProgressReporter, watchRecording } from "./src/ui";
+
+const RENDER_OPTIONS = {
+  wallpaper: { type: "string" },
+  width: { type: "string" },
+  height: { type: "string" },
+  padding: { type: "string" },
+  "screen-radius": { type: "string" },
+  position: { type: "string" },
+  "camera-size": { type: "string" },
+  "camera-radius": { type: "string" },
+  "camera-margin": { type: "string" },
+  "no-camera": { type: "boolean" },
+} as const;
 
 const HELP = `
 rollterm — terminal screen recorder for demos
@@ -20,32 +40,51 @@ rollterm — terminal screen recorder for demos
 Usage:
   rollterm devices
   rollterm record [options]
-  rollterm merge <screen.mp4> <camera.mp4> [options]
+  rollterm render <session-dir> [options]
 
 Commands:
   devices   List screens, cameras, and microphones
-  record    Record screen with optional camera overlay
-  merge     Combine screen + camera (picture-in-picture)
+  record    Record screen + camera, then render automatically
+  render    Re-render a session with different settings
 
 Record options:
-  -o, --output <file>       Final video name (default: <uuid>/output.mp4 under ~/Movies/rollterm)
+  -o, --output <file>       Output video (default: <uuid>/rendered.mp4)
   -s, --screen <index>      Screen device index
   -c, --camera <index>      Camera index (default: first camera)
-      --no-camera           Disable camera overlay
+      --no-camera           Disable camera capture and render
   -m, --mic <index>         Microphone index
-  --no-mic                  Disable microphone
-  --fps <n>                 Frame rate (default: 30)
-  --duration <seconds>      Stop after N seconds
-  --position <corner>       PiP: bottom-right, bottom-left, top-right, top-left
-  --camera-size <WxH>       Camera overlay size (default: 320x240)
-  --no-cursor               Hide mouse cursor
+      --no-mic              Disable microphone
+      --fps <n>             Frame rate (default: 30)
+      --duration <seconds>  Stop after N seconds
+      --screen-width <px>   Max screen encode width (default: 1920)
+      --no-cursor           Hide mouse cursor
+      --tracks-only         Save raw tracks only; skip render
   -h, --help                Show help
+
+Render options (record + render commands):
+  --wallpaper <preset|path> Background preset or path to an image
+  --width <px>              Canvas width (default: 1920)
+  --height <px>             Canvas height (default: 1080)
+  --padding <px>            Inset around screen (default: 72)
+  --screen-radius <px>      Screen corner radius (default: 20)
+  --position <corner>       Camera corner: bottom-right, bottom-left, top-right, top-left
+  --camera-size <px>        Camera bubble diameter (default: 240)
+  --camera-radius <px>      Camera corner radius — use 999 for circle (default: 999)
+  --camera-margin <px>      Camera inset from canvas edge (default: 56)
+
+Wallpaper presets:
+${formatPresetList()}
+
+Session layout (~/Movies/rollterm/<uuid>/):
+  screen.mp4    camera.mp4    audio.m4a
+  rollterm.json   rendered.mp4
 
 Examples:
   rollterm devices
-  rollterm record -o demo.mp4
-  rollterm record --camera 0 --duration 60 -o demo.mp4
-  rollterm merge screen.mp4 camera.mp4 -o final.mp4
+  rollterm record
+  rollterm record --wallpaper tahoe-light --padding 40
+  rollterm record --tracks-only
+  rollterm render ~/Movies/rollterm/<uuid> --position top-left
 
 macOS: allow Screen Recording + Camera for your terminal in System Settings.
 `.trim();
@@ -96,10 +135,11 @@ async function cmdRecord(argv: string[]): Promise<void> {
       "no-mic": { type: "boolean" },
       fps: { type: "string" },
       duration: { type: "string" },
-      position: { type: "string" },
-      "camera-size": { type: "string" },
+      "screen-width": { type: "string" },
       "no-cursor": { type: "boolean" },
+      "tracks-only": { type: "boolean" },
       help: { type: "boolean", short: "h" },
+      ...RENDER_OPTIONS,
     },
     allowPositionals: false,
   });
@@ -120,6 +160,8 @@ async function cmdRecord(argv: string[]): Promise<void> {
   }
 
   const paths = createRecordingSession(values.output);
+  const renderOverrides = parseRenderOverrides(values, parsePosition);
+  const progress = new RenderProgressReporter();
 
   const options: RecordOptions = {
     paths,
@@ -136,9 +178,13 @@ async function cmdRecord(argv: string[]): Promise<void> {
         : defaultMic?.index,
     fps: values.fps ? Number(values.fps) : 30,
     duration: values.duration ? Number(values.duration) : undefined,
-    position: parsePosition(values.position),
-    cameraSize: values["camera-size"] ?? "320x240",
+    screenMaxWidth: values["screen-width"]
+      ? Number(values["screen-width"])
+      : DEFAULT_SCREEN_MAX_WIDTH,
     showCursor: !values["no-cursor"],
+    render: renderOverrides,
+    skipRender: values["tracks-only"] ?? false,
+    onRenderProgress: (update) => progress.update(update),
   };
 
   const ffmpegPath = resolveFfmpeg();
@@ -153,6 +199,7 @@ async function cmdRecord(argv: string[]): Promise<void> {
     output: paths.final,
     sessionDir: paths.dir,
     duration: options.duration,
+    requireOutput: !options.skipRender,
     onStop: () => handle.stop(),
     wait: () => handle.wait(),
     lastError: () => handle.lastError(),
@@ -162,14 +209,13 @@ async function cmdRecord(argv: string[]): Promise<void> {
   if (code !== 0) process.exit(code);
 }
 
-async function cmdMerge(argv: string[]): Promise<void> {
+async function cmdRender(argv: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
     options: {
       output: { type: "string", short: "o" },
-      position: { type: "string" },
-      "camera-size": { type: "string" },
       help: { type: "boolean", short: "h" },
+      ...RENDER_OPTIONS,
     },
     allowPositionals: true,
   });
@@ -179,19 +225,27 @@ async function cmdMerge(argv: string[]): Promise<void> {
     return;
   }
 
-  const [screenPath, cameraPath] = positionals;
-  if (!screenPath || !cameraPath) {
-    console.error("Usage: rollterm merge <screen.mp4> <camera.mp4> [-o output.mp4]");
+  const sessionArg = positionals[0] ?? recordingsDir();
+  let sessionDir: string;
+  try {
+    sessionDir = resolveSessionDir(sessionArg);
+  } catch {
+    console.error(
+      `Usage: rollterm render <session-dir> [--wallpaper sequoia-sunrise]\n\nRecordings root: ${recordingsDir()}`,
+    );
     process.exit(1);
   }
 
-  await mergeFromCli({
-    screenPath,
-    cameraPath,
-    output: createRecordingSession(values.output).final,
-    position: parsePosition(values.position),
-    cameraSize: values["camera-size"] ?? "320x240",
+  const renderOverrides = parseRenderOverrides(values, parsePosition);
+  const progress = new RenderProgressReporter();
+  const start = Date.now();
+
+  const output = await renderFromPath(sessionDir, renderOverrides, {
+    onProgress: (update) => progress.update(update),
   });
+
+  const secs = ((Date.now() - start) / 1000).toFixed(1);
+  console.log(`Saved ${output} (${secs}s)`);
 }
 
 async function main(): Promise<void> {
@@ -209,8 +263,8 @@ async function main(): Promise<void> {
     case "record":
       await cmdRecord(rest);
       return;
-    case "merge":
-      await cmdMerge(rest);
+    case "render":
+      await cmdRender(rest);
       return;
     default:
       console.error(`Unknown command: ${command}\n`);

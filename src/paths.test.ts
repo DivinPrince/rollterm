@@ -6,7 +6,7 @@ describe("createRecordingSession", () => {
   test("default session uses uuid folder and standard track names", () => {
     const paths = createRecordingSession();
     expect(paths.dir).toMatch(/rollterm[/\\][0-9a-f-]{36}$/);
-    expect(paths.final).toBe(join(paths.dir, "output.mp4"));
+    expect(paths.final).toBe(join(paths.dir, "rendered.mp4"));
     expect(paths.screen).toBe(join(paths.dir, "screen.mp4"));
     expect(paths.camera).toBe(join(paths.dir, "camera.mp4"));
     expect(paths.audio).toBe(join(paths.dir, "audio.m4a"));

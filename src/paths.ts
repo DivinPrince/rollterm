@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 export interface RecordingPaths {
   /** Session folder containing all tracks */
   dir: string;
+  /** Final rendered video export */
   final: string;
   screen: string;
   camera: string;
@@ -42,7 +43,7 @@ function pathsInDir(dir: string, final: string): RecordingPaths {
 
 /**
  * Create a session folder. Default: `~/Movies/rollterm/<uuid>/` with
- * `screen.mp4`, `camera.mp4`, `audio.m4a`, and `output.mp4`.
+ * `screen.mp4`, `camera.mp4`, `audio.m4a`, and `rendered.mp4`.
  */
 export function createRecordingSession(output?: string): RecordingPaths {
   if (output && (isAbsolute(output) || dirname(output) !== ".")) {
@@ -51,6 +52,6 @@ export function createRecordingSession(output?: string): RecordingPaths {
   }
 
   const dir = join(recordingsDir(), randomUUID());
-  const finalName = output ?? "output.mp4";
+  const finalName = output ?? "rendered.mp4";
   return pathsInDir(dir, join(dir, finalName));
 }

@@ -27,10 +27,36 @@ export function formatElapsed(seconds: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function progressBar(pct: number, width = 24): string {
+  const filled = Math.round((pct / 100) * width);
+  return `[${"█".repeat(filled)}${"░".repeat(width - filled)}]`;
+}
+
+export interface RenderProgressUpdate {
+  frame: number;
+  total: number;
+}
+
+export class RenderProgressReporter {
+  private start = Date.now();
+  private lastLine = "";
+
+  update({ frame, total }: RenderProgressUpdate): void {
+    const pct = total > 0 ? Math.min(100, Math.round((frame / total) * 100)) : 0;
+    const elapsed = formatElapsed(Math.floor((Date.now() - this.start) / 1000));
+    const line = `Rendering ${progressBar(pct)}  ${String(pct).padStart(3)}%  ${frame}/${total} frames  ${elapsed}`;
+    if (line === this.lastLine && frame !== total) return;
+    this.lastLine = line;
+    process.stdout.write(`\r\x1b[K${line}`);
+    if (frame === total) process.stdout.write("\n");
+  }
+}
+
 export async function watchRecording(options: {
   output: string;
   sessionDir?: string;
   duration?: number;
+  requireOutput?: boolean;
   onStop: () => Promise<number>;
   wait: () => Promise<number>;
   lastError?: () => string;
@@ -40,6 +66,7 @@ export async function watchRecording(options: {
   let stopped = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let lastLine = "";
+  const requireOutput = options.requireOutput ?? true;
 
   const halt = () => {
     stopped = true;
@@ -62,8 +89,9 @@ export async function watchRecording(options: {
   const finish = async (code: number) => {
     halt();
     process.stdout.write("\n");
-    const saved = code === 0 || (await outputLooksValid(options.output));
-    if (saved) {
+    const outputReady =
+      !requireOutput || code === 0 || (await outputLooksValid(options.output));
+    if (outputReady && code === 0) {
       if (options.sessionDir) {
         process.stdout.write(`${options.sessionDir}\n`);
       } else {

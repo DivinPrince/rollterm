@@ -1,9 +1,10 @@
+import { buildVideoEncodeArgs } from "./encode";
 import { resolveFfmpeg } from "./ffmpeg";
 import {
   buildAvfoundationMicInput,
   buildAvfoundationVideoInput,
 } from "./filters";
-import { mergeRecording } from "./merge";
+import { initSessionConfig, renderFromPath } from "./render";
 import { normalizeStopCode, outputLooksValid } from "./output";
 import type { RecordOptions } from "./types";
 
@@ -32,7 +33,11 @@ async function startSeparateRecording(
     ...screenAvfoundationInput(options),
     "-i",
     buildAvfoundationVideoInput(options.screenIndex),
-    ...videoEncodeArgs(options),
+    ...buildVideoEncodeArgs({
+      track: "screen",
+      fps: options.fps,
+      screenMaxWidth: options.screenMaxWidth,
+    }),
     "-an",
   ]);
   if (options.duration) screenArgs.push("-t", String(options.duration));
@@ -46,7 +51,7 @@ async function startSeparateRecording(
       ...cameraAvfoundationInput(options),
       "-i",
       buildAvfoundationVideoInput(options.cameraIndex),
-      ...videoEncodeArgs(options),
+      ...buildVideoEncodeArgs({ track: "camera", fps: options.fps }),
       "-an",
     ]);
     if (options.duration) cameraArgs.push("-t", String(options.duration));
@@ -61,6 +66,10 @@ async function startSeparateRecording(
       ...micAvfoundationInput(),
       "-i",
       buildAvfoundationMicInput(options.micIndex),
+      "-ar",
+      "48000",
+      "-ac",
+      "1",
       "-c:a",
       "aac",
       "-b:a",
@@ -72,11 +81,15 @@ async function startSeparateRecording(
   }
 
   const requiredTracks = async (): Promise<boolean> => {
-    if (!(await outputLooksValid(paths.screen))) return false;
+    if (!(await outputLooksValid(paths.screen))) {
+      process.stderr.write("Screen track missing or incomplete.\n");
+      return false;
+    }
     if (
       options.cameraIndex !== undefined &&
       !(await outputLooksValid(paths.camera))
     ) {
+      process.stderr.write("Camera track missing or incomplete.\n");
       return false;
     }
     return true;
@@ -84,51 +97,46 @@ async function startSeparateRecording(
 
   const audioTrackReady = () => outputLooksValid(paths.audio);
 
-  const artifacts = async (): Promise<string[]> => {
-    const files: string[] = [];
-    if (await outputLooksValid(paths.screen)) files.push(paths.screen);
-    if (
-      options.cameraIndex !== undefined &&
-      (await outputLooksValid(paths.camera))
-    ) {
-      files.push(paths.camera);
-    }
-    if (options.micIndex !== undefined && (await audioTrackReady())) {
-      files.push(paths.audio);
-    }
-    return files;
-  };
+  const artifacts = (): string[] => [
+    paths.dir,
+    paths.final,
+    paths.screen,
+    paths.camera,
+    paths.audio,
+  ];
 
   const finalize = async (): Promise<number> => {
-    process.stdout.write("\nMerging...\n");
-    const useAudio =
-      options.micIndex !== undefined && (await audioTrackReady());
-    if (options.micIndex !== undefined && !useAudio) {
-      process.stdout.write(
-        "Note: audio track unavailable — merging without mic.\n",
-      );
-    }
-    const code = await mergeRecording({
-      screenPath: paths.screen,
-      cameraPath: paths.camera,
-      output: paths.final,
-      position: options.position,
-      cameraSize: options.cameraSize,
-      audioPath: useAudio ? paths.audio : undefined,
-      fps: options.fps,
-      includeCamera: options.cameraIndex !== undefined,
+    initSessionConfig({
+      dir: paths.dir,
+      paths,
+      record: options,
+      hasCamera: options.cameraIndex !== undefined,
+      renderOverrides: options.render,
     });
-    return normalizeStopCode(code, paths.final);
+
+    if (options.skipRender) return 0;
+
+    try {
+      await renderFromPath(paths.dir, options.render ?? {}, {
+        onProgress: options.onRenderProgress,
+      });
+      return (await outputLooksValid(paths.final)) ? 0 : 1;
+    } catch (error) {
+      process.stderr.write(
+        `\nRender failed: ${error instanceof Error ? error.message : error}\n`,
+      );
+      return 1;
+    }
   };
 
-  const stopAllAndMerge = async (): Promise<number> => {
+  const stopAllAndRender = async (): Promise<number> => {
     await Promise.all(procs.map((p) => p.stop()));
     if (!(await requiredTracks())) return 1;
     return finalize();
   };
 
   return {
-    stop: stopAllAndMerge,
+    stop: stopAllAndRender,
     wait: async () => {
       await Promise.all(procs.map((p) => p.wait()));
       if (!(await requiredTracks())) return 1;
@@ -139,29 +147,12 @@ async function startSeparateRecording(
         .map((p) => p.lastError())
         .filter(Boolean)
         .join("\n"),
-    artifacts: () => [paths.dir, paths.final, paths.screen, paths.camera, paths.audio],
+    artifacts,
   };
 }
 
 function globalArgs(rest: string[]): string[] {
   return ["-hide_banner", ...rest];
-}
-
-function videoEncodeArgs(options: RecordOptions): string[] {
-  return [
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "20",
-    "-pix_fmt",
-    "yuv420p",
-    "-fps_mode",
-    "cfr",
-    "-r",
-    String(options.fps),
-  ];
 }
 
 function screenAvfoundationInput(options: RecordOptions): string[] {
@@ -189,7 +180,7 @@ function cameraAvfoundationInput(options: RecordOptions): string[] {
 }
 
 function micAvfoundationInput(): string[] {
-  return ["-ar", "48000", "-ac", "1", "-f", "avfoundation"];
+  return ["-f", "avfoundation"];
 }
 
 function spawnRecording(args: string[], outputPath: string): RecordingHandle {
@@ -213,8 +204,9 @@ function spawnRecording(args: string[], outputPath: string): RecordingHandle {
 
   const stop = async () => {
     if (proc.exitCode !== null) {
-      return normalizeStopCode(proc.exitCode ?? 0, outputPath);
+      return await normalizeStopCode(proc.exitCode ?? 0, outputPath);
     }
+
     try {
       proc.stdin.write("q\n");
       proc.stdin.end();
@@ -230,8 +222,8 @@ function spawnRecording(args: string[], outputPath: string): RecordingHandle {
       }),
     ]);
 
-    await Bun.sleep(200);
-    return normalizeStopCode(exited ?? 1, outputPath);
+    await Bun.sleep(500);
+    return await normalizeStopCode(exited ?? 1, outputPath);
   };
 
   return { stop, wait, lastError, artifacts: () => [outputPath] };
