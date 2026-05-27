@@ -1,6 +1,6 @@
 {
   "name": "rollterm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Terminal screen recorder with camera overlay for demos",
   "author": "DivinPrince",
   "license": "MIT",
@@ -24,10 +24,10 @@
   "module": "index.ts",
   "type": "module",
   "bin": {
-    "rollterm": "./bin/rollterm.js"
+    "rollterm": "./rollterm.js"
   },
   "files": [
-    "bin",
+    "rollterm.js",
     "index.ts",
     "src",
     "!src/**/*.test.ts",
