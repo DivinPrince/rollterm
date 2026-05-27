@@ -24,9 +24,10 @@
   "module": "index.ts",
   "type": "module",
   "bin": {
-    "rollterm": "./index.ts"
+    "rollterm": "./bin/rollterm.js"
   },
   "files": [
+    "bin",
     "index.ts",
     "src",
     "!src/**/*.test.ts",
