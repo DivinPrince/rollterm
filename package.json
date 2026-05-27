@@ -2,17 +2,52 @@
   "name": "rollterm",
   "version": "0.1.0",
   "description": "Terminal screen recorder with camera overlay for demos",
+  "author": "DivinPrince",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DivinPrince/rollterm.git"
+  },
+  "homepage": "https://github.com/DivinPrince/rollterm#readme",
+  "bugs": {
+    "url": "https://github.com/DivinPrince/rollterm/issues"
+  },
+  "keywords": [
+    "screen-recorder",
+    "terminal",
+    "cli",
+    "demo",
+    "camera",
+    "ffmpeg",
+    "macos"
+  ],
   "module": "index.ts",
   "type": "module",
   "bin": {
     "rollterm": "./index.ts"
   },
+  "files": [
+    "index.ts",
+    "src",
+    "!src/**/*.test.ts",
+    "assets"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "devices": "bun run index.ts devices",
     "record": "bun run index.ts record",
-    "test": "bun test src/"
+    "test": "bun test src/",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@types/bun": "latest"
   },
   "peerDependencies": {
