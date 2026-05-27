@@ -40,16 +40,66 @@ export interface RenderProgressUpdate {
 export class RenderProgressReporter {
   private start = Date.now();
   private lastLine = "";
+  private lastWrite = 0;
+
+  reset(): void {
+    this.start = Date.now();
+    this.lastLine = "";
+    this.lastWrite = 0;
+  }
 
   update({ frame, total }: RenderProgressUpdate): void {
+    const now = Date.now();
     const pct = total > 0 ? Math.min(100, Math.round((frame / total) * 100)) : 0;
-    const elapsed = formatElapsed(Math.floor((Date.now() - this.start) / 1000));
+    const elapsed = formatElapsed(Math.floor((now - this.start) / 1000));
     const line = `Rendering ${progressBar(pct)}  ${String(pct).padStart(3)}%  ${frame}/${total} frames  ${elapsed}`;
     if (line === this.lastLine && frame !== total) return;
+    if (frame !== total && now - this.lastWrite < 100) return;
+    this.lastWrite = now;
     this.lastLine = line;
     process.stdout.write(`\r\x1b[K${line}`);
     if (frame === total) process.stdout.write("\n");
   }
+}
+
+export async function printRecordingResult(options: {
+  code: number;
+  output: string;
+  sessionDir?: string;
+  requireOutput?: boolean;
+  lastError?: () => string;
+  artifacts?: () => string[];
+}): Promise<number> {
+  const requireOutput = options.requireOutput ?? true;
+  const outputReady =
+    !requireOutput ||
+    options.code === 0 ||
+    (await outputLooksValid(options.output));
+  if (outputReady && options.code === 0) {
+    if (options.sessionDir) {
+      process.stdout.write(`${options.sessionDir}\n`);
+    } else {
+      process.stdout.write(`${options.output}\n`);
+    }
+    const listed: string[] = [];
+    for (const file of options.artifacts?.() ?? []) {
+      if (file === options.sessionDir || !(await outputLooksValid(file))) {
+        continue;
+      }
+      listed.push(basename(file));
+    }
+    for (const name of listed) process.stdout.write(`  ${name}\n`);
+    return 0;
+  }
+  process.stdout.write(`Recording exited with code ${options.code}\n`);
+  const detail = options.lastError?.().trim();
+  if (detail) {
+    process.stdout.write("\nffmpeg:\n");
+    process.stdout.write(`${detail}\n`);
+    const hint = recordingHint(detail);
+    if (hint) process.stdout.write(`\n${hint}\n`);
+  }
+  return options.code;
 }
 
 export async function watchRecording(options: {
@@ -57,6 +107,8 @@ export async function watchRecording(options: {
   sessionDir?: string;
   duration?: number;
   requireOutput?: boolean;
+  /** When true, finish() only clears the timer — caller prints results. */
+  skipSuccessOutput?: boolean;
   onStop: () => Promise<number>;
   wait: () => Promise<number>;
   lastError?: () => string;
@@ -66,7 +118,6 @@ export async function watchRecording(options: {
   let stopped = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let lastLine = "";
-  const requireOutput = options.requireOutput ?? true;
 
   const halt = () => {
     stopped = true;
@@ -89,33 +140,15 @@ export async function watchRecording(options: {
   const finish = async (code: number) => {
     halt();
     process.stdout.write("\n");
-    const outputReady =
-      !requireOutput || code === 0 || (await outputLooksValid(options.output));
-    if (outputReady && code === 0) {
-      if (options.sessionDir) {
-        process.stdout.write(`${options.sessionDir}\n`);
-      } else {
-        process.stdout.write(`${options.output}\n`);
-      }
-      const listed: string[] = [];
-      for (const file of options.artifacts?.() ?? []) {
-        if (file === options.sessionDir || !(await outputLooksValid(file))) {
-          continue;
-        }
-        listed.push(basename(file));
-      }
-      for (const name of listed) process.stdout.write(`  ${name}\n`);
-      return 0;
-    }
-    process.stdout.write(`Recording exited with code ${code}\n`);
-    const detail = options.lastError?.().trim();
-    if (detail) {
-      process.stdout.write("\nffmpeg:\n");
-      process.stdout.write(`${detail}\n`);
-      const hint = recordingHint(detail);
-      if (hint) process.stdout.write(`\n${hint}\n`);
-    }
-    return code;
+    if (options.skipSuccessOutput) return code;
+    return printRecordingResult({
+      code,
+      output: options.output,
+      sessionDir: options.sessionDir,
+      requireOutput: options.requireOutput,
+      lastError: options.lastError,
+      artifacts: options.artifacts,
+    });
   };
 
   return new Promise<number>((resolve) => {

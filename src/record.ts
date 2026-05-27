@@ -9,10 +9,17 @@ import { normalizeStopCode, outputLooksValid } from "./output";
 import type { RecordOptions } from "./types";
 
 export interface RecordingHandle {
+  waitCapture: () => Promise<number>;
+  stopCapture: () => Promise<number>;
+  render: () => Promise<number>;
+  lastError: () => string;
+  artifacts: () => string[];
+}
+
+interface CaptureProcessHandle {
   stop: () => Promise<number>;
   wait: () => Promise<number>;
   lastError: () => string;
-  artifacts: () => string[];
 }
 
 export async function startRecording(
@@ -25,7 +32,7 @@ async function startSeparateRecording(
   options: RecordOptions,
 ): Promise<RecordingHandle> {
   const paths = options.paths;
-  const procs: ReturnType<typeof spawnRecording>[] = [];
+  const procs: CaptureProcessHandle[] = [];
 
   const screenArgs = globalArgs([
     "-thread_queue_size",
@@ -105,7 +112,7 @@ async function startSeparateRecording(
     paths.audio,
   ];
 
-  const finalize = async (): Promise<number> => {
+  const prepareSession = (): void => {
     initSessionConfig({
       dir: paths.dir,
       paths,
@@ -113,7 +120,23 @@ async function startSeparateRecording(
       hasCamera: options.cameraIndex !== undefined,
       renderOverrides: options.render,
     });
+  };
 
+  const waitCapture = async (): Promise<number> => {
+    await Promise.all(procs.map((p) => p.wait()));
+    if (!(await requiredTracks())) return 1;
+    prepareSession();
+    return 0;
+  };
+
+  const stopCapture = async (): Promise<number> => {
+    await Promise.all(procs.map((p) => p.stop()));
+    if (!(await requiredTracks())) return 1;
+    prepareSession();
+    return 0;
+  };
+
+  const render = async (): Promise<number> => {
     if (options.skipRender) return 0;
 
     try {
@@ -129,19 +152,10 @@ async function startSeparateRecording(
     }
   };
 
-  const stopAllAndRender = async (): Promise<number> => {
-    await Promise.all(procs.map((p) => p.stop()));
-    if (!(await requiredTracks())) return 1;
-    return finalize();
-  };
-
   return {
-    stop: stopAllAndRender,
-    wait: async () => {
-      await Promise.all(procs.map((p) => p.wait()));
-      if (!(await requiredTracks())) return 1;
-      return finalize();
-    },
+    waitCapture,
+    stopCapture,
+    render,
     lastError: () =>
       procs
         .map((p) => p.lastError())
@@ -183,7 +197,7 @@ function micAvfoundationInput(): string[] {
   return ["-f", "avfoundation"];
 }
 
-function spawnRecording(args: string[], outputPath: string): RecordingHandle {
+function spawnRecording(args: string[], outputPath: string): CaptureProcessHandle {
   const stderrLines: string[] = [];
   const proc = Bun.spawn([resolveFfmpeg(), ...args], {
     stdout: "ignore",

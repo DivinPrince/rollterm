@@ -19,7 +19,7 @@ import {
 import { startRecording } from "./src/record";
 import type { PipPosition, RecordOptions } from "./src/types";
 import { createRecordingSession } from "./src/paths";
-import { RenderProgressReporter, watchRecording } from "./src/ui";
+import { printRecordingResult, RenderProgressReporter, watchRecording } from "./src/ui";
 
 const RENDER_OPTIONS = {
   wallpaper: { type: "string" },
@@ -195,18 +195,46 @@ async function cmdRecord(argv: string[]): Promise<void> {
   }
 
   const handle = await startRecording(options);
-  const code = await watchRecording({
+  const captureCode = await watchRecording({
     output: paths.final,
     sessionDir: paths.dir,
     duration: options.duration,
-    requireOutput: !options.skipRender,
-    onStop: () => handle.stop(),
-    wait: () => handle.wait(),
+    skipSuccessOutput: true,
+    onStop: () => handle.stopCapture(),
+    wait: () => handle.waitCapture(),
     lastError: () => handle.lastError(),
     artifacts: () => handle.artifacts(),
   });
 
-  if (code !== 0) process.exit(code);
+  if (captureCode !== 0) {
+    process.exit(
+      await printRecordingResult({
+        code: captureCode,
+        output: paths.final,
+        sessionDir: paths.dir,
+        requireOutput: false,
+        lastError: () => handle.lastError(),
+        artifacts: () => handle.artifacts(),
+      }),
+    );
+  }
+
+  if (!options.skipRender) {
+    progress.reset();
+    const renderCode = await handle.render();
+    if (renderCode !== 0) process.exit(renderCode);
+  }
+
+  process.exit(
+    await printRecordingResult({
+      code: 0,
+      output: paths.final,
+      sessionDir: paths.dir,
+      requireOutput: !options.skipRender,
+      lastError: () => handle.lastError(),
+      artifacts: () => handle.artifacts(),
+    }),
+  );
 }
 
 async function cmdRender(argv: string[]): Promise<void> {
