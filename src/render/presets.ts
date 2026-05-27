@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RenderBackgroundSettings } from "./config";
@@ -11,10 +11,29 @@ export interface WallpaperPreset {
   file: string;
 }
 
-const assetsDir = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../assets/wallpapers",
-);
+/** Resolve package root from source (`src/render/`) or bundled entry (`dist/`). */
+export function packageRoot(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  while (true) {
+    const pkgPath = join(dir, "package.json");
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+          name?: string;
+        };
+        if (pkg.name === "rollterm") return dir;
+      } catch {
+        /* keep walking */
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error("Could not locate rollterm package root");
+}
+
+const assetsDir = join(packageRoot(), "assets/wallpapers");
 
 export const WALLPAPER_PRESETS: WallpaperPreset[] = [
   {
@@ -33,6 +52,9 @@ export function wallpaperPath(preset: WallpaperPresetId): string {
   const found = WALLPAPER_PRESETS.find((p) => p.id === preset);
   if (!found) {
     throw new Error(`Unknown wallpaper preset: ${preset}`);
+  }
+  if (!existsSync(found.file)) {
+    throw new Error(`Bundled wallpaper missing: ${found.file}`);
   }
   return found.file;
 }
