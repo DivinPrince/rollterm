@@ -1,5 +1,11 @@
 # rollterm
 
+## 0.1.2
+
+### Patch Changes
+
+- 277793f: Build CLI with `bun build --target bun` for npm install and publish via `bun publish` in GitHub Actions.
+
 ## 0.1.1
 
 ### Patch Changes
