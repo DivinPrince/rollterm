@@ -24,13 +24,10 @@
   "module": "index.ts",
   "type": "module",
   "bin": {
-    "rollterm": "./rollterm.js"
+    "rollterm": "./dist/index.js"
   },
   "files": [
-    "rollterm.js",
-    "index.ts",
-    "src",
-    "!src/**/*.test.ts",
+    "dist",
     "assets"
   ],
   "engines": {
@@ -43,9 +40,11 @@
     "devices": "bun run index.ts devices",
     "record": "bun run index.ts record",
     "test": "bun test src/",
+    "build": "bun build ./index.ts --outdir dist --target bun --external canvas --external '@ffmpeg-installer/*'",
+    "prepublishOnly": "bun run build",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "changeset publish"
+    "release": "bun publish --access public"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
