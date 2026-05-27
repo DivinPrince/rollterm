@@ -25,6 +25,20 @@ export function isBundledFfmpeg(path = resolveFfmpeg()): boolean {
   return path.includes("ffmpeg-installer");
 }
 
+export function resolveFfprobe(): string {
+  const fromEnv = process.env.ROLLTERM_FFPROBE?.trim();
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+
+  const onPath = Bun.which("ffprobe");
+  if (onPath) return onPath;
+
+  const ffmpeg = resolveFfmpeg();
+  const sibling = ffmpeg.replace(/ffmpeg([^/\\]*)$/, "ffprobe$1");
+  if (sibling !== ffmpeg && existsSync(sibling)) return sibling;
+
+  return ffmpeg;
+}
+
 export async function runFfmpeg(
   args: string[],
   options: { signal?: AbortSignal; onStderr?: (line: string) => void } = {},
